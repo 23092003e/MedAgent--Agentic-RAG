@@ -1,13 +1,21 @@
 # backend/config.py
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 
 # Load environment variables from .env file if present
 load_dotenv()
 
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+
 # Paths
-DATA_PATH = os.getenv("DATA_PATH", "data/raw")
-DB_FAISS_PATH = os.getenv("DB_FAISS_PATH", "vectorstore/database_faiss")
+DATA_PATH = Path(os.getenv("DATA_PATH", "data/raw"))
+# Convert to absolute path
+DATA_PATH = BASE_DIR / DATA_PATH
+
+DB_FAISS_PATH = Path(os.getenv("DB_FAISS_PATH", "vectorstore/database_faiss"))
+DB_FAISS_PATH = BASE_DIR / DB_FAISS_PATH
 
 # Embedding model
 EMBEDDING_MODEL_NAME = os.getenv(
