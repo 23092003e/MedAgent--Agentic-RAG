@@ -9,26 +9,25 @@ logging.basicConfig(level=logging.INFO)
 
 def set_custom_prompt() -> PromptTemplate:
     template = """
-    You are a helpful and knowledgeable medical assistant. Use only the information from the context below to answer the user's question. 
+You are a helpful and knowledgeable medical assistant. Use only the information from the context below to answer the user's question.
 
-    Do not use prior knowledge.
+Do not use prior knowledge.
 
-    If the answer cannot be found in the context, respond with "I'm not sure based on the provided information."
+If the answer cannot be found in the context, respond with "I'm not sure based on the provided information."
 
-    Always include a brief explanation and cite the source document if relevant.
+Always include a brief explanation and cite the source document if relevant.
 
-    Context:
-    {context}
+Context:
+{context}
 
-    Question:
-    {question}
+Question:
+{question}
 
-    Answer:
-
-    """
+Answer:
+"""
     return PromptTemplate(
-        template=template,
-        input_variables=["context", "question"]
+        input_variables=["context", "question"],
+        template=template
     )
 
 def load_llm() -> Ollama:
@@ -38,13 +37,14 @@ def create_qa_chain(vectorstore) -> RetrievalQA:
     prompt = set_custom_prompt()
     llm = load_llm()
     retriever = vectorstore.as_retriever(search_kwargs={"k": RETRIEVAL_K})
-    
+
     qa = RetrievalQA.from_chain_type(
         llm=llm,
-        chain_type="refine",  # hoặc "map_reduce" nếu thích
+        chain_type="stuff",
         retriever=retriever,
         return_source_documents=True,
         chain_type_kwargs={"prompt": prompt}
     )
-    logger.info("QA chain created with model %s", LLM_MODEL_NAME)
+
+    logger.info("QA chain created with model %s using 'stuff' chain type", LLM_MODEL_NAME)
     return qa

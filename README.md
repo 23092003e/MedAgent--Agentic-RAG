@@ -5,4 +5,8 @@ MedAgent: AI Agent Supporting Clinical Advice with Retrieval-Augmented Domain Kn
 # Run to prepare database
 python -m backend.rag.prepare_db
 
+# Run app
+streamlit run frontend/medibot.py   
+
+
 
