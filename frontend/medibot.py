@@ -446,7 +446,7 @@ def main():
         st.markdown('</div>', unsafe_allow_html=True)
         
         # Footer
-        st.markdown('<div class="footer">This AI assistant provides information for educational purposes only. Always consult with healthcare professionals for medical advice.</div>', unsafe_allow_html=True)
+        st.markdown('<div class="footer">This AI assistant provides information for educational purposes only. Always consult with healthcare professionals for medical advice 🪄.</div>', unsafe_allow_html=True)
 
 if __name__ == '__main__':
     main()
