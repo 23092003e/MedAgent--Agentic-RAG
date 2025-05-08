@@ -2,6 +2,8 @@ import os
 import sys
 import time
 from datetime import datetime
+import requests
+import logging
 
 # Add project root to path (MUST happen before backend imports!)
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -396,35 +398,42 @@ def main():
                     if not vectorstore:
                         st.error("Failed to access the knowledge base. Please try again later.")
                     else:
-                        # Create and invoke QA chain
-                        qa_chain = create_qa_chain(vectorstore)
-                        response = qa_chain.invoke({'query': user_question})
-                        answer = response.get('result', '')
-                        
-                        # Process sources based on settings
-                        sources = response.get('source_documents', [])
-                        source_text = ''
-                        if st.session_state.include_sources and sources:
-                            source_text = '\n'.join([f"- {doc.metadata.get('source', '')}" for doc in sources])
-                        
-                        # Format the assistant's response
-                        content = f"{answer}"
-                        if source_text:
-                            content += f"\n\n**Source Docs:**\n{source_text}"
-                        
-                        # Simulate typing delay for a more natural feel
-                        time.sleep(0.5)
-                        
-                        # Add assistant message to chat history
-                        assistant_msg = {
-                            'role': 'assistant', 
-                            'content': content,
-                            'timestamp': datetime.now().strftime("%H:%M")
-                        }
-                        st.session_state.messages.append(assistant_msg)
-                        
-                        # Clear the input field for next input
-                        st.session_state.user_input = ""
+                        try:
+                            # Create and invoke QA chain
+                            qa_chain = create_qa_chain(vectorstore)
+                            response = qa_chain.invoke({'query': user_question})
+                            answer = response.get('result', '')
+                            
+                            # Process sources based on settings
+                            sources = response.get('source_documents', [])
+                            source_text = ''
+                            if st.session_state.include_sources and sources:
+                                source_text = '\n'.join([f"- {doc.metadata.get('source', '')}" for doc in sources])
+                            
+                            # Format the assistant's response
+                            content = f"{answer}"
+                            if source_text:
+                                content += f"\n\n**Source Docs:**\n{source_text}"
+                            
+                            # Simulate typing delay for a more natural feel
+                            time.sleep(0.5)
+                            
+                            # Add assistant message to chat history
+                            assistant_msg = {
+                                'role': 'assistant', 
+                                'content': content,
+                                'timestamp': datetime.now().strftime("%H:%M")
+                            }
+                            st.session_state.messages.append(assistant_msg)
+                            
+                            # Clear the input field for next input
+                            st.session_state.user_input = ""
+                        except requests.exceptions.ConnectionError:
+                            st.error("Cannot connect to the AI model. Please ensure Ollama server is running.")
+                            logger.error("Failed to connect to Ollama server at localhost:11434")
+                        except Exception as e:
+                            st.error("An error occurred while processing your question. Please try again.")
+                            logger.error(f"Error in QA chain: {str(e)}")
         
         # Display chat messages
         display_chat_history()
