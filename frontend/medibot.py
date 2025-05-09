@@ -295,15 +295,25 @@ def display_chat_history():
                 st.markdown(f'<div class="timestamp" style="text-align: right;">{timestamp}</div>', unsafe_allow_html=True)
                 st.markdown(f'<div class="user-message"><span class="message-icon user-icon">👤</span>{msg["content"]}</div>', unsafe_allow_html=True)
             else:
-                st.markdown(f'<div class="timestamp">{timestamp}</div>', unsafe_allow_html=True)
-                
-                # Split content to separate answer and sources
+                # Split content and reflection
                 content_parts = msg['content'].split("**Source Docs:**")
                 answer = content_parts[0].strip()
                 
-                st.markdown(f'<div class="bot-message"><span class="message-icon bot-icon">🏥</span>{answer}', unsafe_allow_html=True)
+                st.markdown(f'<div class="bot-message">', unsafe_allow_html=True)
+                st.markdown(f'<span class="message-icon bot-icon">🏥</span>{answer}', unsafe_allow_html=True)
                 
-                # Display sources if available
+                # Display confidence score if available
+                if 'reflection' in msg:
+                    confidence = msg['reflection'].get('confidence_score', 0)
+                    st.progress(confidence/100, text=f"Confidence: {confidence}%")
+                    
+                    # Show reflection details in expander
+                    with st.expander("See analysis"):
+                        st.write("Verified claims:", msg['reflection'].get('verified_claims', []))
+                        st.write("Missing information:", msg['reflection'].get('missing_information', []))
+                        st.write("Suggested improvements:", msg['reflection'].get('suggested_improvements', []))
+                
+                # Display sources
                 if len(content_parts) > 1 and st.session_state.include_sources:
                     sources = content_parts[1].strip()
                     st.markdown(f'<div class="source-docs"><div class="source-title">Sources:</div>{sources}</div>', unsafe_allow_html=True)
