@@ -1,3 +1,5 @@
+"""Custom exceptions for MedAgent"""
+
 from .exceptions import MedAgentError, VectorStoreError
 from .logging_config import setup_logging
 
@@ -10,13 +12,21 @@ class VectorStoreError(MedAgentError):
     pass
 
 class DocumentError(MedAgentError):
-    """Document processing errors"""
+    """Document processing related errors"""
     pass
 
-class ReflectionError(MedAgentError):
-    """Self-reflection related errors"""
+class ModelError(MedAgentError):
+    """ML model related errors"""
     pass
 
 class ConfigError(MedAgentError):
     """Configuration related errors"""
+    pass
+
+class ConnectionError(MedAgentError):
+    """Connection related errors (e.g. Ollama server)"""
+    pass
+
+class ResourceError(MedAgentError):
+    """Resource management related errors"""
     pass

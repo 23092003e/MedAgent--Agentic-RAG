@@ -10,9 +10,15 @@ faiss-cpu==1.7.4
 pydantic>=2.0.0
 python-dotenv>=0.19.0  # For .env support
 typing-extensions>=4.0.0  # For enhanced type hints
+requests>=2.25.0
+tenacity>=8.0.0
 
 # Frontend
 streamlit==1.32.2
 
 # Ollama
 ollama==0.1.7
+
+# Testing
+pytest>=7.0.0
+pytest-asyncio>=0.18.0

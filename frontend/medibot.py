@@ -4,6 +4,18 @@ import time
 from datetime import datetime
 import requests
 import logging
+from pathlib import Path
+
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler('medagent.log')
+    ]
+)
 
 # Add project root to path (MUST happen before backend imports!)
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -13,6 +25,10 @@ import streamlit as st
 from backend.config import DB_FAISS_PATH
 from backend.rag.vector_store import load_vector_store
 from backend.rag.retrieval_qa import create_qa_chain
+from backend.rag.logging_config import setup_logging
+from backend.rag.exceptions import MedAgentError, ConnectionError
+from backend.rag.resource_manager import resource_manager
+from backend.rag.self_reflection import SelfReflectionChain
 
 # Page configuration
 st.set_page_config(
@@ -268,9 +284,14 @@ def apply_custom_css():
 @st.cache_resource
 def get_vectorstore():
     try:
-        return load_vector_store(DB_FAISS_PATH)
+        # Get from resource manager or create new
+        vectorstore = resource_manager.get("vectorstore")
+        if not vectorstore:
+            vectorstore = load_vector_store(DB_FAISS_PATH)
+            resource_manager.register("vectorstore", vectorstore)
+        return vectorstore
     except Exception as e:
-        st.error(f"Failed to load vector store: {e}")
+        logger.error(f"Failed to load vector store: {e}")
         return None
 
 def handle_input():
@@ -332,140 +353,186 @@ def clear_conversation():
     }
     st.session_state.messages.append(welcome_msg)
 
+def check_ollama_server():
+    """Check if Ollama server is running and accessible"""
+    try:
+        response = requests.get("http://localhost:11434/api/tags")
+        return response.status_code == 200
+    except requests.exceptions.ConnectionError as e:
+        logger.error(f"Failed to connect to Ollama server: {e}")
+        raise ConnectionError("Cannot connect to Ollama server") from e
+
+def initialize_llm():
+    """Initialize LLM with connection check"""
+    try:
+        if not check_ollama_server():
+            raise ConnectionError(
+                "Cannot connect to Ollama server. Please ensure:\n"
+                "1. Ollama is installed\n"
+                "2. Server is running (run 'ollama serve')\n"
+                "3. Model is downloaded (run 'ollama pull medllama2')"
+            )
+        llm = load_llm()
+        resource_manager.register("llm", llm)
+        return llm
+    except Exception as e:
+        logger.error(f"Failed to initialize LLM: {e}")
+        raise
+
 def main():
-    apply_custom_css()
-    
-    # Sidebar
-    with st.sidebar:
-        st.title("MedAgent")
-        st.markdown("Your AI-powered medical information assistant")
-        st.markdown("---")
+    try:
+        apply_custom_css()
         
-        # Optional settings
-        st.subheader("Settings")
+        # Initialize components
+        llm = initialize_llm()
+        if not llm:
+            st.error("Failed to initialize AI model. Please check the logs.")
+            return
+            
+        reflection_chain = SelfReflectionChain(llm)
+        resource_manager.register("reflection_chain", reflection_chain)
         
-        # We'll store these in session_state so they persist
-        if 'temperature' not in st.session_state:
-            st.session_state.temperature = 0.7
-        if 'include_sources' not in st.session_state:
-            st.session_state.include_sources = True
+        # Sidebar
+        with st.sidebar:
+            st.title("MedAgent")
+            st.markdown("Your AI-powered medical information assistant")
+            st.markdown("---")
             
-        temperature = st.slider("AI Creativity", 
-                               min_value=0.0, 
-                               max_value=1.0, 
-                               value=st.session_state.temperature, 
-                               step=0.1,
-                               key="temperature_slider")
-        include_sources = st.checkbox("Show sources", 
-                                     value=st.session_state.include_sources,
-                                     key="include_sources_checkbox")
+            # Optional settings
+            st.subheader("Settings")
+            
+            # We'll store these in session_state so they persist
+            if 'temperature' not in st.session_state:
+                st.session_state.temperature = 0.7
+            if 'include_sources' not in st.session_state:
+                st.session_state.include_sources = True
+            
+            temperature = st.slider("AI Creativity", 
+                                   min_value=0.0, 
+                                   max_value=1.0, 
+                                   value=st.session_state.temperature, 
+                                   step=0.1,
+                                   key="temperature_slider")
+            include_sources = st.checkbox("Show sources", 
+                                         value=st.session_state.include_sources,
+                                         key="include_sources_checkbox")
+            
+            st.markdown("---")
+            st.button("Clear Conversation", on_click=clear_conversation)
+            
+            st.markdown("---")
+            st.markdown("© 2025 MedAgent AI")
+            st.markdown("For informational purposes only. Not a substitute for professional medical advice.")
         
-        st.markdown("---")
-        st.button("Clear Conversation", on_click=clear_conversation)
-            
-        st.markdown("---")
-        st.markdown("© 2025 MedAgent AI")
-        st.markdown("For informational purposes only. Not a substitute for professional medical advice.")
-    
-    # Main content area
-    col1, col2, col3 = st.columns([1, 6, 1])
-    
-    with col2:
-        st.title("🏥 MedAgent Chatbot")
-        st.markdown("Ask any medical question and get AI-powered answers based on trusted sources")
+        # Main content area
+        col1, col2, col3 = st.columns([1, 6, 1])
         
-        # Initialize chat history
-        if 'messages' not in st.session_state:
-            st.session_state.messages = []
+        with col2:
+            st.title("🏥 MedAgent Chatbot")
+            st.markdown("Ask any medical question and get AI-powered answers based on trusted sources")
             
-            # Add welcome message
-            welcome_msg = {
-                'role': 'assistant',
-                'content': "👋 Hello! I'm MedAgent, your medical information assistant. How can I help you today?\n\n**Source Docs:**\nInternal knowledge base",
-                'timestamp': datetime.now().strftime("%H:%M")
-            }
-            st.session_state.messages.append(welcome_msg)
-            
-        # Initialize process_input flag if not exists
-        if 'process_input' not in st.session_state:
-            st.session_state.process_input = False
-            
-        # Handle any pending input processing from previous run
-        if st.session_state.process_input:
-            # Reset the flag first to avoid infinite loop
-            st.session_state.process_input = False
-            
-            # Get the last user message
-            last_user_msg = next((msg for msg in reversed(st.session_state.messages) 
-                                if msg['role'] == 'user'), None)
-            
-            if last_user_msg:
-                user_question = last_user_msg['content']
+            # Initialize chat history
+            if 'messages' not in st.session_state:
+                st.session_state.messages = []
                 
-                # Show loading spinner
-                with st.spinner("Thinking..."):
-                    vectorstore = get_vectorstore()
-                    if not vectorstore:
-                        st.error("Failed to access the knowledge base. Please try again later.")
-                    else:
+                # Add welcome message
+                welcome_msg = {
+                    'role': 'assistant',
+                    'content': "👋 Hello! I'm MedAgent, your medical information assistant. How can I help you today?\n\n**Source Docs:**\nInternal knowledge base",
+                    'timestamp': datetime.now().strftime("%H:%M")
+                }
+                st.session_state.messages.append(welcome_msg)
+                
+            # Initialize process_input flag if not exists
+            if 'process_input' not in st.session_state:
+                st.session_state.process_input = False
+            
+            # Handle input processing
+            if st.session_state.process_input:
+                st.session_state.process_input = False
+                
+                last_user_msg = next(
+                    (msg for msg in reversed(st.session_state.messages) 
+                    if msg['role'] == 'user'), 
+                    None
+                )
+                
+                if last_user_msg:
+                    user_question = last_user_msg['content']
+                    
+                    with st.spinner("Thinking..."):
                         try:
+                            # Get vector store
+                            vectorstore = get_vectorstore()
+                            if not vectorstore:
+                                raise MedAgentError("Failed to access knowledge base")
+                                
                             # Create and invoke QA chain
                             qa_chain = create_qa_chain(vectorstore)
                             response = qa_chain.invoke({'query': user_question})
+                            
+                            # Get answer and sources
                             answer = response.get('result', '')
-                            
-                            # Process sources based on settings
                             sources = response.get('source_documents', [])
-                            source_text = ''
+                            
+                            # Analyze response quality
+                            source_texts = [doc.page_content for doc in sources]
+                            reflection = reflection_chain.analyze_response(answer, source_texts)
+                            
+                            # Format response
+                            content = reflection.get('improved_response', answer)
                             if st.session_state.include_sources and sources:
-                                source_text = '\n'.join([f"- {doc.metadata.get('source', '')}" for doc in sources])
-                            
-                            # Format the assistant's response
-                            content = f"{answer}"
-                            if source_text:
+                                source_text = '\n'.join([
+                                    f"- {doc.metadata.get('source', '')}" 
+                                    for doc in sources
+                                ])
                                 content += f"\n\n**Source Docs:**\n{source_text}"
-                            
-                            # Simulate typing delay for a more natural feel
-                            time.sleep(0.5)
-                            
-                            # Add assistant message to chat history
+                                
+                            # Add to chat history
                             assistant_msg = {
-                                'role': 'assistant', 
+                                'role': 'assistant',
                                 'content': content,
-                                'timestamp': datetime.now().strftime("%H:%M")
+                                'timestamp': datetime.now().strftime("%H:%M"),
+                                'reflection': reflection.get('analysis', {})
                             }
                             st.session_state.messages.append(assistant_msg)
-                            
-                            # Clear the input field for next input
                             st.session_state.user_input = ""
-                        except requests.exceptions.ConnectionError:
+                            
+                        except ConnectionError as e:
                             st.error("Cannot connect to the AI model. Please ensure Ollama server is running.")
-                            logger.error("Failed to connect to Ollama server at localhost:11434")
+                            logger.error(f"Connection error: {e}")
                         except Exception as e:
                             st.error("An error occurred while processing your question. Please try again.")
-                            logger.error(f"Error in QA chain: {str(e)}")
-        
-        # Display chat messages
-        display_chat_history()
-        
-        # Custom input area
-        st.markdown('<div class="input-container">', unsafe_allow_html=True)
-        cols = st.columns([8, 1])
-        with cols[0]:
-            # Create the text input with on_change handler
-            st.text_input("", 
-                         placeholder="Type your question here...",
-                         key="user_input", 
-                         on_change=handle_input,
-                         label_visibility="collapsed")
-        with cols[1]:
-            st.markdown('<div class="send-button">', unsafe_allow_html=True)
-            st.button("Send", on_click=handle_input)
+                            logger.error(f"Error in processing: {e}")
+            
+            # Display chat messages
+            display_chat_history()
+            
+            # Custom input area
+            st.markdown('<div class="input-container">', unsafe_allow_html=True)
+            cols = st.columns([8, 1])
+            with cols[0]:
+                # Create the text input with on_change handler
+                st.text_input("", 
+                             placeholder="Type your question here...",
+                             key="user_input", 
+                             on_change=handle_input,
+                             label_visibility="collapsed")
+            with cols[1]:
+                st.markdown('<div class="send-button">', unsafe_allow_html=True)
+                st.button("Send", on_click=handle_input)
+                st.markdown('</div>', unsafe_allow_html=True)
             st.markdown('</div>', unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
-        
-        # Footer
-        st.markdown('<div class="footer">This AI assistant provides information for educational purposes only. Always consult with healthcare professionals for medical advice 🪄.</div>', unsafe_allow_html=True)
+            
+            # Footer
+            st.markdown('<div class="footer">This AI assistant provides information for educational purposes only. Always consult with healthcare professionals for medical advice 🪄.</div>', unsafe_allow_html=True)
+
+    except Exception as e:
+        logger.error(f"Application error: {e}")
+        st.error("An unexpected error occurred. Please check the logs.")
+    finally:
+        # Cleanup resources on exit
+        resource_manager.cleanup()
 
 if __name__ == '__main__':
     main()
