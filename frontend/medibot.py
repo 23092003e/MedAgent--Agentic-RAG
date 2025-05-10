@@ -298,42 +298,38 @@ def handle_input():
         st.session_state.process_input = True  # Flag to process input in next rerun
 
 def display_chat_history():
-    chat_container = st.container()
-    with chat_container:
-        st.markdown('<div class="chat-container">', unsafe_allow_html=True)
-        for msg in st.session_state.messages:
-            timestamp = msg.get('timestamp', datetime.now().strftime("%H:%M"))
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
             
-            if msg['role'] == 'user':
-                st.markdown(f'<div class="timestamp" style="text-align: right;">{timestamp}</div>', unsafe_allow_html=True)
-                st.markdown(f'<div class="user-message"><span class="message-icon user-icon">👤</span>{msg["content"]}</div>', unsafe_allow_html=True)
-            else:
-                # Split content and reflection
-                content_parts = msg['content'].split("**Source Docs:**")
-                answer = content_parts[0].strip()
-                
-                st.markdown(f'<div class="bot-message">', unsafe_allow_html=True)
-                st.markdown(f'<span class="message-icon bot-icon">🏥</span>{answer}', unsafe_allow_html=True)
-                
-                # Display confidence score if available
-                if 'reflection' in msg:
-                    confidence = msg['reflection'].get('confidence_score', 0)
-                    st.progress(confidence/100, text=f"Confidence: {confidence}%")
-                    
-                    # Show reflection details in expander
+            # Display reflection analysis if available
+            if message["role"] == "assistant" and "reflection" in message:
+                reflection = message["reflection"]
+                if reflection:
                     with st.expander("See analysis"):
-                        st.write("Verified claims:", msg['reflection'].get('verified_claims', []))
-                        st.write("Missing information:", msg['reflection'].get('missing_information', []))
-                        st.write("Suggested improvements:", msg['reflection'].get('suggested_improvements', []))
-                
-                # Display sources
-                if len(content_parts) > 1 and st.session_state.include_sources:
-                    sources = content_parts[1].strip()
-                    st.markdown(f'<div class="source-docs"><div class="source-title">Sources:</div>{sources}</div>', unsafe_allow_html=True)
-                
-                st.markdown('</div>', unsafe_allow_html=True)
-        
-        st.markdown('</div>', unsafe_allow_html=True)
+                        # Display confidence score
+                        confidence = reflection.get("confidence_score", 0)
+                        st.markdown(f"**Confidence:** {confidence}%")
+                        
+                        # Display verified claims
+                        if reflection.get("verified_claims"):
+                            st.markdown("**Verified claims:**")
+                            for claim in reflection["verified_claims"]:
+                                st.markdown(f"- {claim}")
+                                
+                        # Display missing information
+                        if reflection.get("missing_information"):
+                            st.markdown("**Missing information:**")
+                            for info in reflection["missing_information"]:
+                                st.markdown(f"- {info}")
+                                
+                        # Display suggested improvements
+                        if reflection.get("suggested_improvements"):
+                            st.markdown("**Suggested improvements:**")
+                            for improvement in reflection["suggested_improvements"]:
+                                st.markdown(f"- {improvement}")
+            
+            st.markdown(f"<div class='timestamp'>{message['timestamp']}</div>", unsafe_allow_html=True)
 
 def clear_conversation():
     st.session_state.messages = []
@@ -463,29 +459,42 @@ def main():
                             qa_chain = create_qa_chain(vectorstore)
                             response = qa_chain.invoke({'query': user_question})
                             
-                            # Get answer and sources
-                            answer = response.get('result', '')
+                            # Get answer and sources with kiểm tra null
+                            answer = response.get('result', '') or "I couldn't generate an answer."
                             sources = response.get('source_documents', [])
                             
                             # Analyze response quality
-                            source_texts = [doc.page_content for doc in sources]
-                            reflection = reflection_chain.analyze_response(answer, source_texts)
+                            source_texts = [
+                                doc.page_content or "No content available" 
+                                for doc in sources 
+                                if hasattr(doc, 'page_content')
+                            ]
                             
-                            # Format response
-                            content = reflection.get('improved_response', answer)
+                            if source_texts:
+                                reflection = reflection_chain.analyze_response(answer, source_texts)
+                            else:
+                                reflection = {'analysis': {}, 'improved_response': None}
+                            
+                            # Format response với kiểm tra null
+                            content = reflection.get('improved_response') or answer
+                            
                             if st.session_state.include_sources and sources:
-                                source_text = '\n'.join([
-                                    f"- {doc.metadata.get('source', '')}" 
-                                    for doc in sources
-                                ])
-                                content += f"\n\n**Source Docs:**\n{source_text}"
+                                valid_sources = []
+                                for doc in sources:
+                                    source = doc.metadata.get('source') if hasattr(doc, 'metadata') else None
+                                    if source:
+                                        valid_sources.append(f"- {source}")
                                 
-                            # Add to chat history
+                                if valid_sources:
+                                    source_text = '\n'.join(valid_sources)
+                                    content = f"{content}\n\n**Source Docs:**\n{source_text}"
+                            
+                            # Add to chat history với kiểm tra null
                             assistant_msg = {
                                 'role': 'assistant',
                                 'content': content,
                                 'timestamp': datetime.now().strftime("%H:%M"),
-                                'reflection': reflection.get('analysis', {})
+                                'reflection': reflection.get('analysis', {}) if reflection else {}
                             }
                             st.session_state.messages.append(assistant_msg)
                             st.session_state.user_input = ""

@@ -20,12 +20,10 @@ Follow these steps:
 5. Suggest improvements if needed
 
 Output format:
-- Verified claims:
-- Unsupported claims:
-- Missing information:
-- Medical accuracy:
-- Confidence score:
-- Suggested improvements:
+{verified_claims}
+{missing_info}
+{improvements}
+Confidence: [0-100]%
 """,
             input_variables=["response", "sources"]
         )
@@ -86,11 +84,9 @@ Improved response:""",
             lines = reflection.strip().split("\n")
             analysis = {
                 "verified_claims": [],
-                "unsupported_claims": [],
                 "missing_information": [],
-                "medical_accuracy": "",
-                "confidence_score": 0,
-                "suggested_improvements": []
+                "suggested_improvements": [],
+                "confidence_score": 0
             }
             
             current_section = None
@@ -99,27 +95,20 @@ Improved response:""",
                 if not line:
                     continue
                     
-                if line.startswith("- Verified claims:"):
+                if "Verified claims:" in line:
                     current_section = "verified_claims"
-                elif line.startswith("- Unsupported claims:"):
-                    current_section = "unsupported_claims"
-                elif line.startswith("- Missing information:"):
+                elif "Missing information:" in line:
                     current_section = "missing_information"
-                elif line.startswith("- Medical accuracy:"):
-                    current_section = "medical_accuracy"
-                elif line.startswith("- Confidence score:"):
+                elif "Suggested improvements:" in line:
+                    current_section = "suggested_improvements"
+                elif "Confidence:" in line:
                     try:
                         score = int(line.split(":")[1].strip().rstrip("%"))
                         analysis["confidence_score"] = score
                     except (ValueError, IndexError):
                         analysis["confidence_score"] = 0
-                elif line.startswith("- Suggested improvements:"):
-                    current_section = "suggested_improvements"
                 elif current_section and line.startswith("- "):
-                    if isinstance(analysis[current_section], list):
-                        analysis[current_section].append(line[2:])
-                    else:
-                        analysis[current_section] = line[2:]
+                    analysis[current_section].append(line[2:].strip())
                         
             return analysis
             
@@ -129,7 +118,7 @@ Improved response:""",
     def _improve_response(self, original_response: str, analysis: Dict) -> Optional[str]:
         """Generate improved response based on analysis"""
         try:
-            if not analysis["missing_information"] and not analysis["unsupported_claims"] and not analysis["suggested_improvements"]:
+            if not analysis["missing_information"] and not analysis["suggested_improvements"]:
                 return None
                 
             improved = self.llm.invoke(

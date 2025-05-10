@@ -1,8 +1,5 @@
 """Custom exceptions for MedAgent"""
 
-from .exceptions import MedAgentError, VectorStoreError
-from .logging_config import setup_logging
-
 class MedAgentError(Exception):
     """Base exception for MedAgent"""
     pass
