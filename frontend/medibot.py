@@ -6,17 +6,6 @@ import requests
 import logging
 from pathlib import Path
 
-
-logger = logging.getLogger(__name__)
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler('medagent.log')
-    ]
-)
-
 # Add project root to path (MUST happen before backend imports!)
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, project_root)
@@ -24,11 +13,14 @@ sys.path.insert(0, project_root)
 import streamlit as st
 from backend.config import DB_FAISS_PATH
 from backend.rag.vector_store import load_vector_store
-from backend.rag.retrieval_qa import create_qa_chain
+from backend.rag.retrieval_qa import create_qa_chain, load_llm
 from backend.rag.logging_config import setup_logging
 from backend.rag.exceptions import MedAgentError, ConnectionError
 from backend.rag.resource_manager import resource_manager
 from backend.rag.self_reflection import SelfReflectionChain
+
+# Setup logging
+logger = setup_logging(Path("medagent.log"))
 
 # Page configuration
 st.set_page_config(
