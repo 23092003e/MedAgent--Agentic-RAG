@@ -459,46 +459,64 @@ def main():
                             if not vectorstore:
                                 raise MedAgentError("Failed to access knowledge base")
                                 
-                            # Create and invoke QA chain
+                            # Create and use QA chain
                             qa_chain = create_qa_chain(vectorstore)
-                            response = qa_chain.invoke({'query': user_question})
+                            response = qa_chain({'query': user_question})
                             
-                            # Get answer and sources with kiểm tra null
+                            # Get answer and sources
                             answer = response.get('result', '') or "I couldn't generate an answer."
                             sources = response.get('source_documents', [])
                             
-                            # Analyze response quality
-                            source_texts = [
-                                doc.page_content or "No content available" 
-                                for doc in sources 
-                                if hasattr(doc, 'page_content')
-                            ]
-                            
-                            if source_texts:
-                                reflection = reflection_chain.analyze_response(answer, source_texts)
+                            # Process response and reflection
+                            if sources:
+                                source_texts = [
+                                    doc.page_content 
+                                    for doc in sources 
+                                    if hasattr(doc, 'page_content') and doc.page_content
+                                ]
+                                
+                                if source_texts:
+                                    reflection = reflection_chain.analyze_response(answer, source_texts)
+                                else:
+                                    reflection = {'analysis': {}, 'improved_response': None}
                             else:
                                 reflection = {'analysis': {}, 'improved_response': None}
                             
-                            # Format response với kiểm tra null
+                            # Format response
                             content = reflection.get('improved_response') or answer
                             
                             if st.session_state.include_sources and sources:
                                 valid_sources = []
                                 for doc in sources:
-                                    source = doc.metadata.get('source') if hasattr(doc, 'metadata') else None
-                                    if source:
-                                        valid_sources.append(f"- {source}")
+                                    if hasattr(doc, 'metadata'):
+                                        source = doc.metadata.get('source', '')
+                                        page = doc.metadata.get('page', '')
+                                        section = doc.metadata.get('section', '')
+                                        
+                                        reference = f"- {source}"
+                                        if page:
+                                            reference += f" (Page {page})"
+                                        elif section:
+                                            reference += f" (Section {section})"
+                                            
+                                        # Add score if available for relevance indication
+                                        score = doc.metadata.get('score', '')
+                                        if score:
+                                            reference += f" [Relevance: {score:.2f}]"
+                                            
+                                        valid_sources.append(reference)
                                 
                                 if valid_sources:
                                     source_text = '\n'.join(valid_sources)
-                                    content = f"{content}\n\n**Source Docs:**\n{source_text}"
+                                    content = f"{content}\n\n**References:**\n{source_text}"
                             
-                            # Add to chat history với kiểm tra null
+                            # Add to chat history
                             assistant_msg = {
                                 'role': 'assistant',
                                 'content': content,
                                 'timestamp': datetime.now().strftime("%H:%M"),
-                                'reflection': reflection.get('analysis', {}) if reflection else {}
+                                'reflection': reflection.get('analysis', {}) if reflection else {},
+                                'sources': valid_sources if st.session_state.include_sources else []
                             }
                             st.session_state.messages.append(assistant_msg)
                             st.session_state.user_input = ""

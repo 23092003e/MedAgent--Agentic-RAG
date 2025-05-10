@@ -9,6 +9,7 @@ from langchain_community.document_loaders import (
 )
 from langchain.schema import Document
 from ..config import DATA_PATH, MAX_WORKERS
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +19,7 @@ class DocumentLoadError(Exception):
 
 def load_single_document(file_path: str, loader_cls) -> Optional[List[Document]]:
     """
-    Load a single document with error handling
+    Load a single document with error handling and add detailed metadata
     
     Args:
         file_path: Path to the document
@@ -30,8 +31,41 @@ def load_single_document(file_path: str, loader_cls) -> Optional[List[Document]]
     try:
         loader = loader_cls(file_path)
         docs = loader.load()
-        logger.info(f"Successfully loaded document: {file_path}")
+        
+        if docs:
+            # Add detailed metadata to each document
+            file_name = Path(file_path).name
+            for i, doc in enumerate(docs):
+                if not hasattr(doc, 'metadata'):
+                    doc.metadata = {}
+                    
+                # Basic metadata
+                doc.metadata.update({
+                    'source': file_name,
+                    'file_path': file_path,
+                    'date_loaded': datetime.now().isoformat()
+                })
+                
+                # For PDF documents, page numbers should already be included
+                # For other documents, we'll add section numbers
+                if 'page' not in doc.metadata:
+                    doc.metadata['section'] = i + 1
+                
+                # Add content length for reference
+                doc.metadata['content_length'] = len(doc.page_content)
+            
+            # Log document details
+            doc_count = len(docs)
+            total_chars = sum(len(doc.page_content) for doc in docs)
+            logger.info(f"Loaded document: {file_path}")
+            logger.info(f"Pages/Sections: {doc_count}, Total characters: {total_chars}")
+            
+            # Log sample content for verification
+            if doc_count > 0:
+                logger.debug(f"Sample content from first page: {docs[0].page_content[:200]}...")
+                
         return docs
+        
     except Exception as e:
         logger.error(f"Failed to load document {file_path}: {str(e)}")
         return None
@@ -53,6 +87,8 @@ def load_documents(data_path: str = DATA_PATH) -> List[Document]:
     if not data_path.exists():
         raise DocumentLoadError(f"Data path does not exist: {data_path}")
 
+    logger.info(f"Starting document loading from: {data_path}")
+    
     supported_formats: List[Tuple[str, type]] = [
         ("*.pdf", PyPDFLoader),
         ("*.docx", UnstructuredWordDocumentLoader),
@@ -64,15 +100,17 @@ def load_documents(data_path: str = DATA_PATH) -> List[Document]:
         # Find all matching files
         files_to_process = []
         for pattern, loader_cls in supported_formats:
+            matched_files = list(data_path.glob(pattern))
+            logger.info(f"Found {len(matched_files)} {pattern} files")
             files_to_process.extend([
                 (str(f), loader_cls) 
-                for f in data_path.glob(pattern)
+                for f in matched_files
             ])
             
         if not files_to_process:
             raise DocumentLoadError(f"No supported documents found in {data_path}")
             
-        logger.info(f"Found {len(files_to_process)} documents to process")
+        logger.info(f"Found {len(files_to_process)} total documents to process")
         
         # Process files in parallel
         with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
@@ -87,13 +125,21 @@ def load_documents(data_path: str = DATA_PATH) -> List[Document]:
                     docs = future.result()
                     if docs:
                         all_documents.extend(docs)
+                        logger.info(f"Successfully processed: {file_path}")
+                    else:
+                        logger.warning(f"No documents extracted from: {file_path}")
                 except Exception as e:
                     logger.error(f"Exception processing {file_path}: {str(e)}")
                     
         if not all_documents:
             raise DocumentLoadError("Failed to load any documents successfully")
             
-        logger.info(f"Successfully loaded {len(all_documents)} documents")
+        # Log final statistics
+        total_docs = len(all_documents)
+        total_chars = sum(len(doc.page_content) for doc in all_documents)
+        logger.info(f"Successfully loaded {total_docs} documents")
+        logger.info(f"Total characters across all documents: {total_chars}")
+        
         return all_documents
         
     except Exception as e:
