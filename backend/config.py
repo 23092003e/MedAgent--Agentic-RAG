@@ -12,9 +12,18 @@ class Config(BaseModel):
     """Configuration with validation"""
     
     # Base paths
-    BASE_DIR: Path = Field(default=Path(__file__).resolve().parent.parent)
-    DATA_PATH: Path = Field(default=None)
-    DB_FAISS_PATH: Path = Field(default=None)
+    BASE_DIR: Path = Field(
+        default=Path(__file__).resolve().parent.parent,
+        description="Base directory of the project"
+    )
+    DATA_PATH: Path = Field(
+        default=None,
+        description="Path to raw document directory"
+    )
+    DB_FAISS_PATH: Path = Field(
+        default=None,
+        description="Path to FAISS vector store"
+    )
     
     # Embedding model
     EMBEDDING_MODEL_NAME: str = Field(

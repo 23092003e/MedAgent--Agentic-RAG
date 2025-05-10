@@ -16,11 +16,13 @@ Follow these steps:
 2. Check for any medical inconsistencies
 3. Identify missing important information
 4. Assess confidence level (0-100%)
+5. Suggest improvements if needed
 
 Output format:
 - Verified claims:
 - Unsupported claims:
 - Missing information:
+- Medical accuracy:
 - Confidence score:
 - Suggested improvements:
 """,
