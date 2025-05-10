@@ -299,37 +299,41 @@ def handle_input():
 
 def display_chat_history():
     for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
+        with st.chat_message(message["role"], avatar="👤" if message["role"] == "user" else "🏥"):
             st.markdown(message["content"])
             
             # Display reflection analysis if available
             if message["role"] == "assistant" and "reflection" in message:
                 reflection = message["reflection"]
                 if reflection:
-                    with st.expander("See analysis"):
-                        # Display confidence score
+                    with st.expander("Analysis", label_visibility="visible"):
+                        # Display confidence score with progress bar
                         confidence = reflection.get("confidence_score", 0)
-                        st.markdown(f"**Confidence:** {confidence}%")
+                        st.progress(confidence/100, text=f"Confidence: {confidence}%")
                         
                         # Display verified claims
                         if reflection.get("verified_claims"):
-                            st.markdown("**Verified claims:**")
+                            st.markdown("**✓ Verified claims:**")
                             for claim in reflection["verified_claims"]:
                                 st.markdown(f"- {claim}")
                                 
                         # Display missing information
                         if reflection.get("missing_information"):
-                            st.markdown("**Missing information:**")
+                            st.markdown("**ℹ️ Missing information:**")
                             for info in reflection["missing_information"]:
                                 st.markdown(f"- {info}")
                                 
                         # Display suggested improvements
                         if reflection.get("suggested_improvements"):
-                            st.markdown("**Suggested improvements:**")
+                            st.markdown("**↗️ Suggested improvements:**")
                             for improvement in reflection["suggested_improvements"]:
                                 st.markdown(f"- {improvement}")
             
-            st.markdown(f"<div class='timestamp'>{message['timestamp']}</div>", unsafe_allow_html=True)
+            # Display timestamp with proper label
+            st.markdown(
+                f"<div class='timestamp' aria-label='Message timestamp'>{message['timestamp']}</div>",
+                unsafe_allow_html=True
+            )
 
 def clear_conversation():
     st.session_state.messages = []

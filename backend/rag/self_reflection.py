@@ -2,6 +2,9 @@ from typing import Dict, List, Optional
 from langchain.prompts import PromptTemplate
 from langchain_community.llms import Ollama
 from .exceptions import ModelError
+import logging
+
+logger = logging.getLogger(__name__)
 
 class SelfReflectionChain:
     def __init__(self, llm: Ollama):
@@ -12,17 +15,17 @@ class SelfReflectionChain:
 Response to analyze: {response}
 Source documents: {sources}
 
-Follow these steps:
-1. Verify if all claims are supported by sources
-2. Check for any medical inconsistencies
-3. Identify missing important information
-4. Assess confidence level (0-100%)
-5. Suggest improvements if needed
+Follow these steps and provide your analysis in the exact format below:
 
-Output format:
-{verified_claims}
-{missing_info}
-{improvements}
+Verified claims:
+- [list verified claims here]
+
+Missing information:
+- [list missing information here]
+
+Suggested improvements:
+- [list suggested improvements here]
+
 Confidence: [0-100]%
 """,
             input_variables=["response", "sources"]
@@ -95,25 +98,44 @@ Improved response:""",
                 if not line:
                     continue
                     
-                if "Verified claims:" in line:
+                # Check for section headers
+                if line.lower().startswith("verified claims:"):
                     current_section = "verified_claims"
-                elif "Missing information:" in line:
+                    continue
+                elif line.lower().startswith("missing information:"):
                     current_section = "missing_information"
-                elif "Suggested improvements:" in line:
+                    continue
+                elif line.lower().startswith("suggested improvements:"):
                     current_section = "suggested_improvements"
-                elif "Confidence:" in line:
+                    continue
+                elif line.lower().startswith("confidence:"):
                     try:
-                        score = int(line.split(":")[1].strip().rstrip("%"))
+                        # Extract number from "Confidence: X%"
+                        score_text = line.split(":")[1].strip()
+                        score = int(''.join(filter(str.isdigit, score_text)))
                         analysis["confidence_score"] = score
                     except (ValueError, IndexError):
                         analysis["confidence_score"] = 0
-                elif current_section and line.startswith("- "):
-                    analysis[current_section].append(line[2:].strip())
+                    continue
+                    
+                # Add items to current section
+                if current_section and line.startswith("-"):
+                    item = line[1:].strip()
+                    if item and item != "[list verified claims here]" and \
+                       item != "[list missing information here]" and \
+                       item != "[list suggested improvements here]":
+                        analysis[current_section].append(item)
                         
             return analysis
             
         except Exception as e:
-            raise ModelError(f"Failed to parse reflection: {str(e)}") from e
+            logger.error(f"Error parsing reflection: {str(e)}")
+            return {
+                "verified_claims": [],
+                "missing_information": [],
+                "suggested_improvements": [],
+                "confidence_score": 0
+            }
     
     def _improve_response(self, original_response: str, analysis: Dict) -> Optional[str]:
         """Generate improved response based on analysis"""

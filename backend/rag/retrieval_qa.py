@@ -66,45 +66,58 @@ def load_llm() -> Ollama:
         raise
 
 def create_qa_chain(vectorstore) -> RetrievalQA:
-    """
-    Create a QA chain with improved retrieval and error handling
-    
-    Args:
-        vectorstore: Vector store instance
-        
-    Returns:
-        RetrievalQA chain
-    """
+    """Create a QA chain with improved retrieval and error handling"""
     try:
         prompt = set_custom_prompt()
         llm = load_llm()
         
-        # Configure retriever with search parameters
+        # Configure retriever with better search parameters
         retriever = vectorstore.as_retriever(
             search_kwargs={
                 "k": RETRIEVAL_K,
-                "fetch_k": RETRIEVAL_K * 2  # Fetch more candidates for better selection
+                "fetch_k": RETRIEVAL_K * 2,
+                "score_threshold": 0.5  # Only return relevant documents
             }
         )
 
+        # Create chain with better error handling
         qa = RetrievalQA.from_chain_type(
             llm=llm,
-            chain_type="stuff",  # Use stuff chain for simplicity and better context handling
+            chain_type="stuff",
             retriever=retriever,
             return_source_documents=True,
             chain_type_kwargs={
                 "prompt": prompt,
-                "verbose": True  # Enable verbose mode for better debugging
+                "verbose": True
             }
         )
 
-        logger.info(
-            "QA chain created with model %s using 'stuff' chain type and k=%d", 
-            LLM_MODEL_NAME, 
-            RETRIEVAL_K
-        )
+        # Add fallback handler
+        def qa_with_fallback(query: Dict) -> Dict:
+            try:
+                result = qa.invoke(query)
+                
+                # Check if result is empty or too short
+                if not result.get('result') or len(result['result'].strip()) < 10:
+                    return {
+                        'result': "I apologize, but I couldn't find enough relevant information to answer your question accurately. Could you please:\n" +
+                                 "1. Rephrase your question\n" +
+                                 "2. Be more specific\n" +
+                                 "3. Or ask about a different medical topic",
+                        'source_documents': result.get('source_documents', [])
+                    }
+                return result
+                
+            except Exception as e:
+                logger.error(f"QA chain error: {str(e)}")
+                return {
+                    'result': "I encountered an error while processing your question. Please try asking in a different way.",
+                    'source_documents': []
+                }
+
+        qa.invoke = qa_with_fallback
         return qa
-        
+
     except Exception as e:
         logger.error(f"Failed to create QA chain: {str(e)}")
         raise
