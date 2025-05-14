@@ -1,7 +1,8 @@
 import logging
 import concurrent.futures
+from langchain.document_loaders.base import DocumentLoadError
 from pathlib import Path
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Dict
 from langchain_community.document_loaders import (
     PyPDFLoader,
     DirectoryLoader,
@@ -10,30 +11,32 @@ from langchain_community.document_loaders import (
 from langchain.schema import Document
 from ..config import DATA_PATH, MAX_WORKERS
 from datetime import datetime
+import hashlib
 
 logger = logging.getLogger(__name__)
 
-class DocumentLoadError(Exception):
-    """Custom exception for document loading errors"""
-    pass
+# Cache for loaded documents
+_document_cache: Dict[str, List[Document]] = {}
+
+def get_file_hash(file_path: str) -> str:
+    """Get hash of file contents for caching"""
+    with open(file_path, 'rb') as f:
+        return hashlib.md5(f.read()).hexdigest()
 
 def load_single_document(file_path: str, loader_cls) -> Optional[List[Document]]:
-    """
-    Load a single document with error handling and add detailed metadata
-    
-    Args:
-        file_path: Path to the document
-        loader_cls: Document loader class to use
-        
-    Returns:
-        Optional[List[Document]]: List of loaded documents or None if loading fails
-    """
+    """Load a single document with caching and optimized processing"""
     try:
+        # Check cache first
+        file_hash = get_file_hash(file_path)
+        if file_hash in _document_cache:
+            logger.info(f"Using cached document: {file_path}")
+            return _document_cache[file_hash]
+
         loader = loader_cls(file_path)
         docs = loader.load()
         
         if docs:
-            # Add detailed metadata to each document
+            # Add detailed metadata
             file_name = Path(file_path).name
             for i, doc in enumerate(docs):
                 if not hasattr(doc, 'metadata'):
@@ -43,7 +46,8 @@ def load_single_document(file_path: str, loader_cls) -> Optional[List[Document]]
                 doc.metadata.update({
                     'source': file_name,
                     'file_path': file_path,
-                    'date_loaded': datetime.now().isoformat()
+                    'date_loaded': datetime.now().isoformat(),
+                    'hash': file_hash
                 })
                 
                 # For PDF documents, page numbers should already be included
@@ -51,8 +55,14 @@ def load_single_document(file_path: str, loader_cls) -> Optional[List[Document]]
                 if 'page' not in doc.metadata:
                     doc.metadata['section'] = i + 1
                 
-                # Add content length for reference
+                # Add content length and hash for reference
                 doc.metadata['content_length'] = len(doc.page_content)
+                doc.metadata['content_hash'] = hashlib.md5(
+                    doc.page_content.encode()
+                ).hexdigest()
+            
+            # Cache the processed documents
+            _document_cache[file_hash] = docs
             
             # Log document details
             doc_count = len(docs)
@@ -71,18 +81,7 @@ def load_single_document(file_path: str, loader_cls) -> Optional[List[Document]]
         return None
 
 def load_documents(data_path: str = DATA_PATH) -> List[Document]:
-    """
-    Load documents from data_path in parallel, including PDF and Word (.docx).
-    
-    Args:
-        data_path: Directory containing documents
-        
-    Returns:
-        List[Document]: List of loaded documents
-        
-    Raises:
-        DocumentLoadError: If no documents could be loaded
-    """
+    """Load documents with parallel processing and caching"""
     data_path = Path(data_path)
     if not data_path.exists():
         raise DocumentLoadError(f"Data path does not exist: {data_path}")
@@ -112,8 +111,10 @@ def load_documents(data_path: str = DATA_PATH) -> List[Document]:
             
         logger.info(f"Found {len(files_to_process)} total documents to process")
         
-        # Process files in parallel
-        with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        # Process files in parallel with optimized thread pool
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=min(MAX_WORKERS, len(files_to_process))
+        ) as executor:
             future_to_file = {
                 executor.submit(load_single_document, file_path, loader_cls): file_path
                 for file_path, loader_cls in files_to_process

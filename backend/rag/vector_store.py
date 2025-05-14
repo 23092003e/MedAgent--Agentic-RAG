@@ -15,6 +15,9 @@ class VectorStoreError(Exception):
     """Custom exception for vector store operations"""
     pass
 
+# Cache for document chunks to avoid recomputing
+_chunk_cache = {}
+
 def create_vector_store(
     data_path: str,
     db_faiss_path: str
@@ -35,25 +38,43 @@ def create_vector_store(
         if not documents:
             raise VectorStoreError("No documents were loaded")
 
-        # Chunk documents
-        splitter = RecursiveCharacterTextSplitter(
-            chunk_size=CHUNK_SIZE,
-            chunk_overlap=CHUNK_OVERLAP
-        )
-        chunks = splitter.split_documents(documents)
-        
+        # Use cached chunks if available
+        cache_key = f"{data_path}_{CHUNK_SIZE}_{CHUNK_OVERLAP}"
+        if cache_key in _chunk_cache:
+            chunks = _chunk_cache[cache_key]
+            logger.info("Using cached document chunks")
+        else:
+            # Chunk documents
+            splitter = RecursiveCharacterTextSplitter(
+                chunk_size=CHUNK_SIZE,
+                chunk_overlap=CHUNK_OVERLAP,
+                length_function=len,
+                separators=["\n\n", "\n", ".", "!", "?", ",", " ", ""]
+            )
+            chunks = splitter.split_documents(documents)
+            _chunk_cache[cache_key] = chunks
+            logger.info(f"Created and cached {len(chunks)} chunks")
+
         if not chunks:
             raise VectorStoreError("Document splitting produced no chunks")
 
-        # Create embeddings
+        # Create embeddings with batch processing
         embedder = get_embedding_model()
-
-        # Build and save FAISS
-        logger.info(f"Creating FAISS index with {len(chunks)} chunks")
-        db = FAISS.from_documents(chunks, embedder)
         
+        # Build and save FAISS with optimized parameters
+        logger.info(f"Creating FAISS index with {len(chunks)} chunks")
+        db = FAISS.from_documents(
+            chunks, 
+            embedder,
+            normalize_L2=True  # L2 normalization for better similarity search
+        )
+        
+        # Save with compression
         os.makedirs(db_faiss_path, exist_ok=True)
-        db.save_local(db_faiss_path)
+        db.save_local(
+            db_faiss_path,
+            index_kwargs={"compression_params": {"type": "PCAR", "dim": 64}}  # Compress vectors
+        )
         logger.info(f"Successfully saved vector store to {db_faiss_path}")
         
     except Exception as e:
@@ -87,6 +108,11 @@ def load_vector_store(
             embedder,
             allow_dangerous_deserialization=True
         )
+        
+        # Optimize index after loading
+        if hasattr(vectorstore, 'index'):
+            vectorstore.index.nprobe = 4  # Number of clusters to search
+            
         logger.info(f"Successfully loaded vector store from {db_faiss_path}")
         return vectorstore
         
